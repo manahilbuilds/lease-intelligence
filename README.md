@@ -141,25 +141,31 @@ streamlit run app.py
 
 ---
 
+
 ## Data
 
-This repository does not include lease documents.
+The `data/` directory is intentionally excluded from this repository via `.gitignore`.
 
-To test the application:
+To use the CLI application:
 
-1. Create a folder named:
+1. Create the following folder:
 
-```
+```text
 data/leases/
 ```
 
-2. Place your own lease PDF files inside the folder.
+2. Place your own lease PDF files inside it.
 
-or
+Example:
 
-Use the Streamlit application to upload lease PDFs directly.
+```text
+data/
+└── leases/
+    ├── lease1.pdf
+    ├── lease2.pdf
+```
 
----
+Alternatively, you can use the Streamlit application to upload lease PDFs directly without creating the folder.
 
 ## Example Questions
 
