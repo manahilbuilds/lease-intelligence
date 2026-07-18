@@ -1,5 +1,7 @@
 from pypdf import PdfReader
 import ollama
+import chromadb
+import os
 
 
 def chunk_text(text, chunk_size=500):
@@ -12,32 +14,164 @@ def chunk_text(text, chunk_size=500):
     return chunks
 
 
-# Read PDF
-reader = PdfReader("data/leases/lease1.pdf")
+# =====================================================
+# READ ALL PDFS
+# =====================================================
 
-text = ""
+all_chunks = []
 
-for page in reader.pages:
-    page_text = page.extract_text()
+for filename in os.listdir("data/leases"):
 
-    if page_text:
-        text += page_text + "\n"
+    if filename.endswith(".pdf"):
 
-# Create chunks
-chunks = chunk_text(text)
+        path = os.path.join("data/leases", filename)
 
-print(f"Created {len(chunks)} chunks")
+        print(f"Reading {filename}")
 
-# Create embeddings for ALL chunks
+        reader = PdfReader(path)
+
+        text = ""
+
+        for page in reader.pages:
+
+            page_text = page.extract_text()
+
+            if page_text:
+                text += page_text + "\n"
+
+        chunks = chunk_text(text)
+
+        for chunk in chunks:
+
+            all_chunks.append(
+                {
+                    "text": chunk,
+                    "source": filename
+                }
+            )
+
+print(f"\nCreated {len(all_chunks)} chunks")
+
+
+# =====================================================
+# CREATE EMBEDDINGS
+# =====================================================
+
 embeddings = []
 
-for chunk in chunks:
+for item in all_chunks:
+
     response = ollama.embed(
         model="nomic-embed-text",
-        input=chunk
+        input=item["text"]
     )
 
     embeddings.append(response["embeddings"][0])
 
 print(f"\nCreated {len(embeddings)} embeddings")
 print(f"Each embedding has {len(embeddings[0])} numbers")
+
+
+# =====================================================
+# CREATE CHROMADB
+# =====================================================
+
+client = chromadb.Client()
+
+try:
+    client.delete_collection("documents")
+except:
+    pass
+
+collection = client.get_or_create_collection(
+    name="documents"
+)
+
+
+# =====================================================
+# STORE IN CHROMA
+# =====================================================
+
+for i, (item, embedding) in enumerate(zip(all_chunks, embeddings)):
+
+    collection.add(
+        ids=[str(i)],
+        embeddings=[embedding],
+        documents=[item["text"]],
+        metadatas=[
+            {
+                "source": item["source"]
+            }
+        ]
+    )
+
+print(f"\nStored {collection.count()} chunks")
+
+
+# =====================================================
+# QUESTION ANSWERING
+# =====================================================
+
+question = input("\nAsk a question: ")
+
+
+question_embedding = ollama.embed(
+    model="nomic-embed-text",
+    input=question
+)["embeddings"][0]
+
+
+results = collection.query(
+    query_embeddings=[question_embedding],
+    n_results=3
+)
+
+
+retrieved_chunks = results["documents"][0]
+retrieved_sources = results["metadatas"][0]
+
+
+print("\nRetrieved Context:\n")
+
+for chunk, source in zip(retrieved_chunks, retrieved_sources):
+
+    print(f"Source: {source['source']}")
+    print(chunk)
+    print("-" * 80)
+
+
+context = "\n\n".join(retrieved_chunks)
+
+prompt = f"""
+You are a lease analysis assistant.
+
+Answer ONLY using the provided context.
+
+If the answer isn't in the context, say:
+
+"I couldn't find that information in the lease."
+
+Context:
+{context}
+
+Question:
+{question}
+"""
+
+
+response = ollama.chat(
+    model="qwen2.5:7b",
+    messages=[
+        {
+            "role": "user",
+            "content": prompt
+        }
+    ]
+)
+
+
+print("\n==========================")
+print("ANSWER")
+print("==========================\n")
+
+print(response["message"]["content"])
